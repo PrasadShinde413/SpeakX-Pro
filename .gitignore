@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+
+# Streamlit
+.streamlit/
+
+# Temporary files & Videos
+*.mp4
+*.mov
+*.avi
+*.wav
+temp/
+tmp/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# (Optional) You can choose to ignore the large model files if you prefer
+# to have users download them manually, but since they are small enough,
+# we will leave them un-ignored for now so it works out of the box.
+# *.task
+# *.tflite
