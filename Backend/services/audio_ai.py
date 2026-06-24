@@ -5,12 +5,22 @@ import subprocess
 import tempfile
 import os
 
-# Expanded filler word list
+# Expanded filler word list (Standard English + Indian English variants)
 FILLER_WORDS = [
+    # Standard English fillers
     " um ", " uh ", " like ", " you know ", " basically ", " literally ",
     " actually ", " so ", " right ", " i mean ", " kind of ", " sort of ",
-    " anyway ", " okay so ", " well ", " hmm "
+    " anyway ", " okay so ", " well ", " hmm ",
+    # Indian English fillers
+    " aa ", " aaa ", " ah ", " aah ", " matlab ", " haan ", " na ",
+    " arre ", " toh ", " woh ", " yaar ", " bas ", " accha ", " theek hai "
 ]
+
+# Single-syllable words that are almost always fillers when stretched > 0.8s
+PROLONGED_FILLER_SOUNDS = {
+    "aa", "aaa", "ah", "aah", "um", "uh", "hmm", "hm",
+    "haan", "na", "toh", "woh", "so", "well", "and"
+}
 
 def extract_audio_from_video(video_path):
     """Extract audio from video and save as a temporary WAV file using ffmpeg."""
@@ -69,9 +79,15 @@ def detect_pauses(whisper_segments, min_pause_sec=0.5):
     }
 
 
+import string
+
 def count_fillers(text):
-    """Count filler words in transcript."""
-    text_lower = " " + text.lower() + " "
+    """Count filler words in transcript using text matching, ignoring punctuation."""
+    # Remove punctuation so words like "uh," or "um." can match our space-padded list " uh "
+    translator = str.maketrans('', '', string.punctuation)
+    text_clean = text.translate(translator)
+    
+    text_lower = " " + text_clean.lower() + " "
     filler_details = {}
     total = 0
     for filler in FILLER_WORDS:
@@ -82,26 +98,81 @@ def count_fillers(text):
     return total, filler_details
 
 
+def detect_prolonged_fillers(words):
+    """
+    Detect filler sounds using Whisper's word-level timestamps.
+    A single-syllable word (e.g., 'aa', 'uh') that takes longer than
+    0.8 seconds to say is almost certainly a prolonged filler sound.
+    This catches sounds that text matching alone would miss.
+    """
+    prolonged_count = 0
+    prolonged_details = {}
+
+    for word_info in words:
+        word = word_info.get("word", "").strip().lower()
+        start = word_info.get("start", 0)
+        end = word_info.get("end", 0)
+        duration = end - start
+
+        # Check if this word is a known single-syllable filler sound
+        # AND if it was stretched beyond 0.8 seconds (a clear filler indicator)
+        if word in PROLONGED_FILLER_SOUNDS and duration >= 0.8:
+            prolonged_count += 1
+            prolonged_details[word] = prolonged_details.get(word, 0) + 1
+
+    return prolonged_count, prolonged_details
+
+
 def analyze_audio(video_path):
     print("Extracting audio from video...")
     audio_path = extract_audio_from_video(video_path)
 
     try:
-        # --- Whisper Transcription ---
+        # --- Whisper Transcription (with word-level timestamps enabled) ---
         print("Loading Whisper model...")
         model = whisper.load_model("base")
         print("Transcribing audio...")
-        result = model.transcribe(audio_path)
+        # initial_prompt primes Whisper to keep filler words instead of silently deleting them.
+        # Without this, Whisper aggressively cleans up "umm", "uh", "aa" etc from the transcript.
+        FILLER_PROMPT = (
+    "Umm,um, let me think, uh, so basically, like, you know, aa, ah, er, erm, "
+    "I mean, right, hmm, mhm, uh-huh, actually, well, kind of, sorta, yeah, "
+    "okay, alright, anyway, anyways, I guess, you see. Haan, matlab, toh, "
+    "arre, yaar, bhai, theek hai, achha, haina, waise, dekho, phir, "
+    "kya bolte hain, jaise."
+)
+        result = model.transcribe(audio_path, word_timestamps=True, initial_prompt=FILLER_PROMPT)
         text = result["text"]
         segments = result.get("segments", [])
+
+        # --- Extract word-level timestamp data from all segments ---
+        all_words = []
+        for seg in segments:
+            words_in_seg = seg.get("words", [])
+            all_words.extend(words_in_seg)
 
         # --- Speaking Rate (WPM) ---
         word_count = len(text.split())
         duration = segments[-1]["end"] if segments else 1
         wpm = round((word_count / duration) * 60)
 
-        # --- Filler Words ---
-        total_fillers, filler_breakdown = count_fillers(text)
+        # --- Filler Words (Method 1: Text Matching) ---
+        text_fillers, filler_breakdown = count_fillers(text)
+
+        # --- Filler Words (Method 2: Prolonged Sound Detection via timestamps) ---
+        prolonged_fillers, prolonged_breakdown = detect_prolonged_fillers(all_words)
+
+        # --- Combine both methods, avoiding double-counting ---
+        # We merge the breakdowns and take the max count per word to avoid duplicates
+        combined_breakdown = dict(filler_breakdown)
+        for word, count in prolonged_breakdown.items():
+            # Only add if prolonged method found MORE instances than text matching
+            existing = combined_breakdown.get(word, 0)
+            if count > existing:
+                combined_breakdown[word] = count
+                prolonged_fillers -= existing  # remove already-counted ones
+
+        total_fillers = sum(combined_breakdown.values())
         fillers_per_minute = round(total_fillers / (duration / 60), 2) if duration > 0 else 0
 
         # --- Pauses ---
@@ -122,10 +193,10 @@ def analyze_audio(video_path):
         "duration_sec": round(duration, 1),
         # Speaking Rate
         "wpm": wpm,
-        # Filler Words
+        # Filler Words (combined from both detection methods)
         "fillers": total_fillers,
         "fillers_per_minute": fillers_per_minute,
-        "filler_breakdown": filler_breakdown,
+        "filler_breakdown": combined_breakdown,
         # Pauses
         "num_pauses": pause_data["num_pauses"],
         "avg_pause_sec": pause_data["avg_pause_sec"],

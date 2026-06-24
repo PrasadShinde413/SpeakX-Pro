@@ -97,15 +97,24 @@ def _sentence_complexity(text):
 def _grammar_check(text):
     """
     Grammar check using language_tool_python.
-    Returns error count and list of error categories.
+    Tries local Java server first, then falls back to Public API.
+    Returns error count, top error categories, and detailed match list.
     """
     try:
         import language_tool_python
-        tool = language_tool_python.LanguageTool('en-US')
+
+        # Try local Java LanguageTool first
+        try:
+            tool = language_tool_python.LanguageTool('en-US')
+        except Exception:
+            # Fallback: use the free public API (no Java required)
+            tool = language_tool_python.LanguageToolPublicAPI('en-US')
+
         matches = tool.check(text)
         tool.close()
 
         error_count = len(matches)
+
         # Summarize error categories
         categories = {}
         for m in matches:
@@ -114,12 +123,22 @@ def _grammar_check(text):
 
         # Top 3 categories
         top_errors = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:3]
-        return error_count, [f"{k}({v})" for k, v in top_errors]
+
+        # Detailed error list for the dropdown report
+        detailed_errors = []
+        for m in matches[:15]:  # Limit to first 15 to avoid info overload
+            detailed_errors.append({
+                "message": m.message,
+                "context": m.context,
+                "suggestions": m.replacements[:3] if m.replacements else [],
+                "rule": m.ruleId
+            })
+
+        return error_count, [f"{k}({v})" for k, v in top_errors], detailed_errors
 
     except Exception as e:
-        # LanguageTool may need Java; gracefully degrade
         print(f"Grammar check skipped: {e}")
-        return -1, ["Grammar check unavailable"]
+        return -1, ["Grammar check unavailable"], []
 
 
 def analyze_nlp(transcript):
@@ -145,7 +164,7 @@ def analyze_nlp(transcript):
     print("Running NLP analysis...")
 
     # Grammar
-    grammar_errors, grammar_top_issues = _grammar_check(transcript)
+    grammar_errors, grammar_top_issues, grammar_errors_detail = _grammar_check(transcript)
 
     # Vocabulary richness
     ttr, unique_words, total_words = _vocabulary_richness(transcript)
@@ -160,6 +179,7 @@ def analyze_nlp(transcript):
         # Grammar
         "grammar_errors": grammar_errors,
         "grammar_top_issues": grammar_top_issues,
+        "grammar_errors_detail": grammar_errors_detail,
 
         # Vocabulary
         "vocabulary_ttr": ttr,

@@ -53,6 +53,89 @@ def _estimate_head_pose(face_landmarks, img_w, img_h):
         return "Unknown"
 
 
+# ---------- Iris Gaze Tracking ----------
+def _detect_iris_gaze(face_landmarks):
+    """
+    Detect if the person is looking at the camera using iris landmark positions.
+
+    MediaPipe Face Mesh provides 478 landmarks:
+      - Left iris center:  473
+      - Right iris center: 468
+      - Left eye corners:  33 (outer), 133 (inner)
+      - Right eye corners: 362 (inner), 263 (outer)
+      - Left eye top/bottom eyelid:  159, 145
+      - Right eye top/bottom eyelid: 386, 374
+
+    Logic:
+      For each eye, compute the horizontal ratio:
+        ratio = (iris_x - eye_inner_x) / (eye_outer_x - eye_inner_x)
+      A ratio near 0.5 means the iris is centered => looking at camera.
+      Also check vertical ratio to see if looking up/down.
+
+    Returns:
+        (bool: is_gazing, float: left_h_ratio, float: right_h_ratio)
+    """
+    try:
+        # Left eye: outer=33, inner=133, iris=468, top=159, bottom=145
+        left_outer  = face_landmarks[33]
+        left_inner  = face_landmarks[133]
+        left_iris   = face_landmarks[468]   # 468 = left iris center
+        left_top    = face_landmarks[159]
+        left_bottom = face_landmarks[145]
+
+        # Right eye: inner=362, outer=263, iris=473, top=386, bottom=374
+        right_inner  = face_landmarks[362]
+        right_outer  = face_landmarks[263]
+        right_iris   = face_landmarks[473]  # 473 = right iris center
+        right_top    = face_landmarks[386]
+        right_bottom = face_landmarks[374]
+
+        # --- Horizontal gaze ratio ---
+        # Left eye: iris relative to [outer(33) ... inner(133)]
+        left_eye_width = abs(left_inner.x - left_outer.x)
+        if left_eye_width > 0:
+            left_h_ratio = (left_iris.x - left_outer.x) / left_eye_width
+        else:
+            return False, 0.5, 0.5
+
+        # Right eye: iris relative to [inner(362) ... outer(263)]
+        right_eye_width = abs(right_outer.x - right_inner.x)
+        if right_eye_width > 0:
+            right_h_ratio = (right_iris.x - right_inner.x) / right_eye_width
+        else:
+            return False, 0.5, 0.5
+
+        # --- Vertical gaze ratio ---
+        left_eye_height = abs(left_bottom.y - left_top.y)
+        if left_eye_height > 0:
+            left_v_ratio = (left_iris.y - left_top.y) / left_eye_height
+        else:
+            left_v_ratio = 0.5
+
+        right_eye_height = abs(right_bottom.y - right_top.y)
+        if right_eye_height > 0:
+            right_v_ratio = (right_iris.y - right_top.y) / right_eye_height
+        else:
+            right_v_ratio = 0.5
+
+        # --- Decision ---
+        # Center zone thresholds — symmetric around 0.5 (iris centered in eye)
+        H_CENTER_LOW  = 0.35
+        H_CENTER_HIGH = 0.65
+        V_CENTER_LOW  = 0.30
+        V_CENTER_HIGH = 0.70
+
+        left_looking  = H_CENTER_LOW < left_h_ratio  < H_CENTER_HIGH and V_CENTER_LOW < left_v_ratio  < V_CENTER_HIGH
+        right_looking = H_CENTER_LOW < right_h_ratio < H_CENTER_HIGH and V_CENTER_LOW < right_v_ratio < V_CENTER_HIGH
+
+        # Both eyes must be gazing forward
+        is_gazing = left_looking and right_looking
+        return is_gazing, left_h_ratio, right_h_ratio
+
+    except Exception:
+        return False, 0.5, 0.5
+
+
 # ---------- Smile detection helper ----------
 def _detect_smile(face_landmarks):
     """
@@ -187,6 +270,7 @@ def analyze_video(video_path):
     # Counters
     frames_processed = 0
     face_detected_frames = 0
+    iris_gaze_frames = 0  # frames where iris gaze is directed at camera
 
     head_pose_counts = {"Forward": 0, "Left": 0, "Right": 0, "Up": 0, "Down": 0, "Unknown": 0}
     smile_frames = 0
@@ -218,12 +302,18 @@ def analyze_video(video_path):
             if face_det_result.detections:
                 face_detected_frames += 1
 
-            # --- Face Landmarks: Head Pose, Smile, Expressions ---
+            # --- Face Landmarks: Iris Gaze, Head Pose, Smile, Expressions ---
             face_lm_result = face_landmarker.detect(mp_image)
             if face_lm_result.face_landmarks:
                 lms = face_lm_result.face_landmarks[0]
                 h, w = frame.shape[:2]
 
+                # Iris-based eye contact (primary metric)
+                is_gazing, _, _ = _detect_iris_gaze(lms)
+                if is_gazing:
+                    iris_gaze_frames += 1
+
+                # Head pose (still tracked for direction metrics)
                 pose_label = _estimate_head_pose(lms, w, h)
                 head_pose_counts[pose_label] = head_pose_counts.get(pose_label, 0) + 1
 
@@ -260,11 +350,11 @@ def analyze_video(video_path):
     dominant_posture = max(posture_counts, key=posture_counts.get)
 
     return {
-        # Eye Contact
-        "eye_contact_pct": pct(face_detected_frames),
+        # Eye Contact (Iris-based: how often both irises are centered in the eye socket)
+        "eye_contact_pct": pct(iris_gaze_frames),
         "frames_sampled": frames_processed,
 
-        # Head Pose
+        # Head Pose (still tracked for direction awareness)
         "head_pose_dominant": dominant_head_pose,
         "head_pose_forward_pct": pct(head_pose_counts.get("Forward", 0)),
 

@@ -7,7 +7,7 @@ from services.nlp_ai import analyze_nlp
 from services.llm_ai import generate_feedback
 
 # Configure the page
-st.set_page_config(page_title="Confidence Coach AI", page_icon="🎥", layout="wide")
+st.set_page_config(page_title="SpeakX-Pro", page_icon="🎥", layout="wide")
 
 # --- Custom CSS for better visuals ---
 st.markdown("""
@@ -36,7 +36,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🎥 Confidence Challenge AI")
+st.title("🎥 SpeakX-Pro")
 st.markdown("Upload your daily 5-minute video to get an automated feedback report on your **English fluency** and **confidence**.")
 
 uploaded_file = st.file_uploader("Upload your daily video", type=["mp4", "mov", "avi"])
@@ -108,6 +108,34 @@ if uploaded_file is not None:
         b2.metric("Pitch Variation", f"{audio_results.get('pitch_variation_hz', 0)} Hz")
         b3.metric("Avg Pause", f"{audio_results.get('avg_pause_sec', 0)}s")
         b4.metric("Total Pause Time", f"{audio_results.get('total_pause_sec', 0)}s")
+
+        # Audio Detailed Report Dropdown
+        with st.expander("📋 Detailed Audio Report"):
+            st.markdown("#### 🗣️ Filler Word Breakdown")
+            filler_breakdown = audio_results.get("filler_breakdown", {})
+            if filler_breakdown:
+                for word, count in sorted(filler_breakdown.items(), key=lambda x: x[1], reverse=True):
+                    st.markdown(f"- **\"{word}\"** — used **{count}** time(s)")
+            else:
+                st.success("✅ No filler words detected!")
+
+            st.markdown("#### ⏸️ Pause Analysis")
+            num_pauses = audio_results.get("num_pauses", 0)
+            avg_pause = audio_results.get("avg_pause_sec", 0)
+            total_pause = audio_results.get("total_pause_sec", 0)
+            duration = audio_results.get("duration_sec", 1)
+            pause_pct = round((total_pause / duration) * 100, 1) if duration > 0 else 0
+            st.markdown(f"- Total pauses detected: **{num_pauses}**")
+            st.markdown(f"- Average pause duration: **{avg_pause}s**")
+            st.markdown(f"- Total silence time: **{total_pause}s** ({pause_pct}% of video)")
+
+            st.markdown("#### 🎵 Vocal Pitch Analysis")
+            mean_pitch = audio_results.get("mean_pitch_hz", 0)
+            pitch_var = audio_results.get("pitch_variation_hz", 0)
+            pitch_label = "Monotone (try to vary your pitch more!)" if pitch_var < 30 else "Dynamic (great vocal variety!)"
+            st.markdown(f"- Mean Pitch: **{mean_pitch} Hz**")
+            st.markdown(f"- Pitch Variation: **{pitch_var} Hz** — {pitch_label}")
+
         st.divider()
 
         # --- VIDEO ANALYSIS ---
@@ -128,7 +156,7 @@ if uploaded_file is not None:
         # --- NLP ANALYSIS ---
         st.markdown("## 🧠 NLP Analysis")
         n1, n2, n3, n4 = st.columns(4)
-        
+
         grammar_val = nlp_results.get('grammar_errors', -1)
         n1.metric("Grammar Errors", grammar_val if grammar_val >= 0 else "N/A")
         n2.metric("Vocab Richness (TTR)", f"{nlp_results.get('vocabulary_ttr', 0):.2f}")
@@ -140,6 +168,48 @@ if uploaded_file is not None:
         n6.metric("Avg Sentence Length", f"{nlp_results.get('avg_sentence_length', 0)} words")
         n7.metric("Reading Ease", nlp_results.get('flesch_reading_ease', 0))
         n8.metric("Grade Level", f"Grade {nlp_results.get('flesch_kincaid_grade', 0)}")
+
+        # NLP Detailed Report Dropdown
+        with st.expander("📋 Detailed NLP Report"):
+            st.markdown("#### ❌ Grammar Error Details")
+            grammar_detail = nlp_results.get("grammar_errors_detail", [])
+            grammar_issues = nlp_results.get("grammar_top_issues", [])
+            if grammar_val == -1:
+                st.warning("⚠️ Grammar check was unavailable. Make sure LanguageTool is installed.")
+            elif grammar_val == 0:
+                st.success("✅ No grammar errors found! Excellent English!")
+            else:
+                if grammar_issues:
+                    st.markdown(f"**Top Error Categories:** {', '.join(grammar_issues)}")
+                for i, err in enumerate(grammar_detail, 1):
+                    with st.container():
+                        st.markdown(f"**Error {i}:** {err.get('message', '')}")
+                        st.markdown(f"&nbsp;&nbsp;📍 Context: *\"{err.get('context', '')}\"*")
+                        suggestions = err.get("suggestions", [])
+                        if suggestions:
+                            st.markdown(f"&nbsp;&nbsp;💡 Suggestions: **{', '.join(suggestions)}**")
+                        st.markdown("---")
+
+            st.markdown("#### 📚 Vocabulary Analysis")
+            ttr = nlp_results.get("vocabulary_ttr", 0)
+            unique = nlp_results.get("unique_words", 0)
+            total_w = nlp_results.get("total_words", 0)
+            ttr_label = "Rich & Diverse" if ttr >= 0.5 else ("Average" if ttr >= 0.35 else "Repetitive (try using more varied words)")
+            st.markdown(f"- Total Words Spoken: **{total_w}**")
+            st.markdown(f"- Unique Words Used: **{unique}**")
+            st.markdown(f"- Vocabulary Richness (TTR): **{ttr}** — {ttr_label}")
+
+            st.markdown("#### 📖 Readability Breakdown")
+            flesch = nlp_results.get("flesch_reading_ease", 0)
+            grade = nlp_results.get("flesch_kincaid_grade", 0)
+            readability = nlp_results.get("readability", "N/A")
+            st.markdown(f"- Flesch Reading Ease Score: **{flesch}** (100 = very easy, 0 = very hard)")
+            st.markdown(f"- Readability Label: **{readability}**")
+            st.markdown(f"- Grade Level: **Grade {grade}** (audience who can easily understand you)")
+            coherence = nlp_results.get("coherence_score", 0)
+            coherence_label = "Highly Coherent" if coherence >= 0.3 else ("Moderate" if coherence >= 0.15 else "Low — try linking your sentences with connecting words")
+            st.markdown(f"- Coherence Score: **{coherence}** — {coherence_label}")
+
         st.divider()
 
         # --- TRANSCRIPT ---
