@@ -1,49 +1,74 @@
-# 🎥 Confidence Coach AI
+# 🎥 SpeakX-Pro (Video Analyzer)
 
-**Confidence Coach** is an intelligent, privacy-first AI platform designed to help individuals dramatically improve their public speaking skills, communication fluency, and self-confidence through the automated analysis of daily 5-minute video recordings.
+**SpeakX-Pro** is an intelligent, privacy-first AI platform designed to help individuals dramatically improve their public speaking skills, communication fluency, and self-confidence through the automated analysis of video recordings.
+
+This project has been completely rebuilt from a monolithic Streamlit app into a modern, full-stack, decoupled architecture utilizing **FastAPI**, **PostgreSQL (`pgvector`)**, and a sleek **React (`shadcn/ui`)** frontend.
 
 ---
 
-## 🎯 Aim & Objectives
-The goal of this project is to provide a fully automated, multi-modal feedback loop for speakers without requiring manual human review. 
+## 🎯 Architecture Overview
 
-*   **Vocal Analysis:** Uses OpenAI Whisper and Librosa to measure speaking pace, pause durations, vocal pitch, and the frequency of filler words.
-*   **Body Language Tracking:** Uses Google MediaPipe vision models to evaluate non-verbal cues, including eye contact, posture alignment, hand gestures, and facial expressions.
-*   **Linguistic Evaluation:** Uses NLP algorithms (NLTK, Textstat, LanguageTool) to assess grammar correctness, vocabulary richness, and sentence coherence.
-*   **AI Coaching Synthesis:** Feeds the extracted metrics into a locally hosted Large Language Model (e.g., Qwen/Llama via Ollama) to generate personalized, highly actionable coaching feedback.
+The platform is divided into three core pillars:
+
+1. **The Machine Learning Pipeline (Python)**
+   - Extracts over 20 unique vocal, visual, and linguistic data points from user videos.
+   - **Audio/Vocal:** Whisper (transcription, pace), Librosa (pitch, variation, pauses).
+   - **Visual/Body Language:** MediaPipe (eye contact, posture, gestures, head pose).
+   - **NLP/Linguistics:** NLTK, Textstat, LanguageTool (grammar, coherence, readability).
+   - **RAG Embeddings:** `sentence-transformers` automatically convert the analysis results into 384-dimensional vectors.
+
+2. **The Backend API (FastAPI & PostgreSQL)**
+   - Exposes RESTful endpoints for Video Upload (`/analyze`), Authentication (`/login`), and RAG Chat (`/chat`).
+   - Uses **JWT Authentication** for secure Role-Based Access Control (RBAC). Admin users can see all videos, while Students can only see their own.
+   - Stores session data in a **PostgreSQL** database.
+   - Uses the **`pgvector`** extension to run natively hardware-accelerated cosine similarity searches across past AI coaching feedback for the AI Chat feature!
+
+3. **The Frontend Dashboard (React + Vite)**
+   - A stunning, glassmorphic UI built using **Tailwind CSS** and **shadcn/ui**.
+   - Features a Light/Dark Mode toggle.
+   - Includes a visual "Student Dashboard" featuring interactive **Recharts** graphs to track performance trends over time.
+   - Provides a ChatGPT-style conversational UI to chat with your personalized AI speaking coach.
 
 ---
 
 ## 🚀 How to Run Locally
 
+Because the application is fully decoupled, you must run both the Backend and Frontend servers concurrently.
+
 ### 1. Prerequisites
 - Python 3.10+
-- [Ollama](https://ollama.com/) installed and running locally.
-- A supported LLM pulled in Ollama (e.g., `ollama run qwen2.5`)
+- Node.js (v18+)
+- PostgreSQL installed locally with the `pgvector` extension enabled.
+- [Ollama](https://ollama.com/) running in the background with your preferred LLM (e.g., `ollama run qwen2.5`).
 
-### 2. Setup
-Clone the repository and install the dependencies:
+### 2. Run the Backend (FastAPI)
+Open your first terminal and run:
 ```bash
-git clone <your-repo-url>
 cd "Video Analyzer/Backend"
 
-# Create and activate virtual environment
-python -m venv venv
-# On Windows:
-venv\Scripts\activate
-# On Mac/Linux:
-# source venv/bin/activate
+# Activate your virtual environment
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Mac/Linux
 
-# Install requirements
-pip install -r requirements.txt
+# Start the server on http://127.0.0.1:8000
+uvicorn main:app --reload
 ```
 
-### 3. Run the App
-Launch the Streamlit dashboard:
+### 3. Run the Frontend (React)
+Open a second terminal and run:
 ```bash
-python -m streamlit run app.py
+cd "Video Analyzer/frontend"
+
+# Ensure dependencies are installed
+npm install
+
+# Start the Vite development server
+npm run dev
 ```
-*Note: Make sure your Ollama application is running in the background before analyzing a video so the Coach Feedback feature works!*
+
+Navigate your browser to **http://localhost:5173** and log in!
+- **Student Demo:** `student1@speakx.com` / `student123`
+- **Admin Demo:** `admin@speakx.com` / `admin123`
 
 ---
 

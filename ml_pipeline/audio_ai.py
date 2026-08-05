@@ -1,6 +1,8 @@
 import whisper
 import librosa
 import numpy as np
+import noisereduce as nr
+import soundfile as sf
 import subprocess
 import tempfile
 import os
@@ -33,6 +35,24 @@ def extract_audio_from_video(video_path):
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return temp_audio.name
+
+
+def clean_audio(audio_path):
+    """
+    Remove background noise from audio using noisereduce.
+    Reads the raw WAV, applies spectral noise gating, and saves
+    a cleaned version back to the same path.
+    """
+    print("Cleaning audio (noise removal)...")
+    try:
+        y, sr = librosa.load(audio_path, sr=16000)
+        # noisereduce uses the first 0.5s of audio as the noise profile
+        # (assumes the start of the recording has background noise without speech)
+        noise_sample = y[:int(sr * 0.5)]
+        y_clean = nr.reduce_noise(y=y, sr=sr, y_noise=noise_sample, prop_decrease=0.75)
+        sf.write(audio_path, y_clean, sr)
+    except Exception as e:
+        print(f"Noise reduction skipped: {e}")
 
 
 def analyze_prosody(audio_path):
@@ -128,9 +148,14 @@ def analyze_audio(video_path):
     audio_path = extract_audio_from_video(video_path)
 
     try:
-        # --- Whisper Transcription (with word-level timestamps enabled) ---
+        # --- Step 1: Noise Removal ---
+        clean_audio(audio_path)
+
+        # --- Step 2: Whisper Transcription ---
+        # Using 'small' model for significantly better accuracy than 'base'
+        # with minimal extra RAM usage on a 16GB machine.
         print("Loading Whisper model...")
-        model = whisper.load_model("base")
+        model = whisper.load_model("small")
         print("Transcribing audio...")
         # initial_prompt primes Whisper to keep filler words instead of silently deleting them.
         # Without this, Whisper aggressively cleans up "umm", "uh", "aa" etc from the transcript.
@@ -141,7 +166,12 @@ def analyze_audio(video_path):
     "arre, yaar, bhai, theek hai, achha, haina, waise, dekho, phir, "
     "kya bolte hain, jaise."
 )
-        result = model.transcribe(audio_path, word_timestamps=True, initial_prompt=FILLER_PROMPT)
+        result = model.transcribe(
+            audio_path,
+            word_timestamps=True,
+            initial_prompt=FILLER_PROMPT,
+            language="en"  # Force English — prevents wrong language detection
+        )
         text = result["text"]
         segments = result.get("segments", [])
 
